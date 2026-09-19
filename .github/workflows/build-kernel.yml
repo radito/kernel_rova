@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build rova Image.gz-dtb
+    name: Build rova Image.gz-dtb (KSU disabled)
     runs-on: ubuntu-24.04
     timeout-minutes: 180
 
@@ -105,19 +105,22 @@ jobs:
             arch/arm64/configs/vendor/xiaomi/msm8937/mi8917.config
           )
 
-          if grep -q CONFIG_KSU_STATIC_HOOKS techpack/KernelSU/kernel/ksu.c 2>/dev/null; then
-            fragments+=(arch/arm64/configs/vendor/feature/ksu_static_hooks.config)
-          fi
-
           fragments+=(
             arch/arm64/configs/vendor/feature/pocket-judge.config
             arch/arm64/configs/vendor/feature/net.config
-            arch/arm64/configs/vendor/feature/ksu_susfs.config
+            arch/arm64/configs/vendor/feature/no-ksu.config
           )
 
           scripts/kconfig/merge_config.sh -m -O "$OUT_DIR" \
             "$OUT_DIR/.config" "${fragments[@]}"
           make "${make_args[@]}" olddefconfig
+
+          if grep -Eq '^CONFIG_KSU.*=y$' "$OUT_DIR/.config"; then
+            echo "KernelSU unexpectedly remains enabled:" >&2
+            grep -E '^CONFIG_KSU' "$OUT_DIR/.config" >&2
+            exit 1
+          fi
+          grep -q '^# CONFIG_KSU is not set$' "$OUT_DIR/.config"
 
       - name: Build kernel
         run: |
@@ -150,7 +153,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: rova-kernel-${{ github.sha }}
+          name: rova-kernel-no-ksu-${{ github.sha }}
           path: artifacts/
           if-no-files-found: error
           retention-days: 14
