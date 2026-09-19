@@ -7,7 +7,7 @@
 bool only_manager(void);
 bool only_root(void);
 bool manager_or_root(void);
-bool always_allow(void);
+bool trusted_caller(void);
 bool allowed_for_su(void);
 
 long ksu_supercall_handle_ioctl(unsigned int cmd, void __user *argp);

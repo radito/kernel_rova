@@ -81,7 +81,17 @@ int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd,
 
 	// Check if this is a request to install KSU fd
 	if (magic2 == KSU_INSTALL_MAGIC2) {
-		int fd = ksu_install_fd();
+		int fd;
+
+		/*
+		 * Do not expose the KernelSU driver to arbitrary applications.
+		 * Without this check, any UID can install [ksu_driver] and use
+		 * GET_INFO as a reliable KernelSU fingerprint.
+		 */
+		if (!trusted_caller())
+			return 0;
+
+		fd = ksu_install_fd();
 		// downstream: dereference all arg usage!
 		if (copy_to_user((void __user *)*arg, &fd, sizeof(fd))) {
 			pr_err("install ksu fd reply err\n");

@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build rova Image.gz-dtb (KernelSU-Next legacy)
+    name: Build rova Image.gz-dtb (KernelSU-Next hardened)
     runs-on: ubuntu-24.04
     timeout-minutes: 180
 
@@ -127,6 +127,10 @@ jobs:
             grep -E '^CONFIG_KSU_SUSFS' "$OUT_DIR/.config" >&2
             exit 1
           fi
+          if grep -q '^CONFIG_IKCONFIG_PROC=y$' "$OUT_DIR/.config"; then
+            echo "/proc/config.gz must remain disabled" >&2
+            exit 1
+          fi
           grep -E '^CONFIG_KSU' "$OUT_DIR/.config"
 
       - name: Build kernel
@@ -160,7 +164,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: rova-kernel-ksun-legacy-${{ github.sha }}
+          name: rova-kernel-ksun-hardened-${{ github.sha }}
           path: artifacts/
           if-no-files-found: error
           retention-days: 14
