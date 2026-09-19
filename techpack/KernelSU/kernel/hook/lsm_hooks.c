@@ -10,6 +10,7 @@
 #include "compat/kernel_compat.h"
 #include "setuid_hook.h"
 #include "manager/throne_tracker.h"
+#include "feature/susfs.h"
 
 #ifndef KSU_KPROBES_HOOK
 
@@ -109,6 +110,14 @@ static int ksu_task_fix_setuid(struct cred *new, const struct cred *old,
 				    (uid_t)new_uid.val);
 }
 
+#ifdef CONFIG_KSU_SUSFS
+static int ksu_task_prctl(int option, unsigned long arg2, unsigned long arg3,
+			  unsigned long arg4, unsigned long arg5)
+{
+	return ksu_susfs_handle_prctl(option, arg2, arg3, arg4, arg5);
+}
+#endif
+
 #ifndef DEVPTS_SUPER_MAGIC
 #define DEVPTS_SUPER_MAGIC	0x1cd1
 #endif
@@ -134,7 +143,10 @@ static struct security_hook_list ksu_hooks[] = {
 #endif
 	LSM_HOOK_INIT(inode_permission, ksu_inode_permission),
 	LSM_HOOK_INIT(inode_rename, ksu_inode_rename),
-	LSM_HOOK_INIT(task_fix_setuid, ksu_task_fix_setuid)
+	LSM_HOOK_INIT(task_fix_setuid, ksu_task_fix_setuid),
+#ifdef CONFIG_KSU_SUSFS
+	LSM_HOOK_INIT(task_prctl, ksu_task_prctl),
+#endif
 };
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)

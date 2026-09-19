@@ -5,4 +5,12 @@ Describe: v3.2.0-legacy-14-ga54e4fa4
 KernelSU version code: 33193
 
 The vendored kernel/ directory is pinned to the commit above. Local changes
-are limited to build/version integration for this Linux 4.19 kernel.
+are limited to build/version integration for this Linux 4.19 kernel and the
+SUSFS bridge. This is the latest official legacy-branch commit; the v3.3.0
+stable branch requires the newer GKI/kprobe architecture and is not a safe
+drop-in replacement for this manual-hook 4.19 kernel.
+
+SUSFS: https://gitlab.com/simonpunk/susfs4ksu
+SUSFS branch: kernel-4.19
+SUSFS commit: 001e69919c6271f690fd00b17e4c721c9e599152
+SUSFS version: v1.5.5

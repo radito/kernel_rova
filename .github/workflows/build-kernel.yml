@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build rova Image.gz-dtb (KernelSU-Next hardened)
+    name: Build rova Image.gz-dtb (KernelSU-Next + SUSFS)
     runs-on: ubuntu-24.04
     timeout-minutes: 180
 
@@ -110,6 +110,7 @@ jobs:
             arch/arm64/configs/vendor/feature/pocket-judge.config
             arch/arm64/configs/vendor/feature/net.config
             arch/arm64/configs/vendor/feature/ksun_legacy.config
+            arch/arm64/configs/vendor/feature/ksu_susfs.config
           )
 
           scripts/kconfig/merge_config.sh -m -O "$OUT_DIR" \
@@ -122,9 +123,12 @@ jobs:
             echo "KernelSU Kprobes hook must remain disabled on kernel 4.19" >&2
             exit 1
           fi
-          if grep -Eq '^CONFIG_KSU_SUSFS.*=y$' "$OUT_DIR/.config"; then
-            echo "SUSFS unexpectedly enabled:" >&2
-            grep -E '^CONFIG_KSU_SUSFS' "$OUT_DIR/.config" >&2
+          grep -q '^CONFIG_KSU_SUSFS=y$' "$OUT_DIR/.config"
+          grep -q '^CONFIG_KSU_SUSFS_SUS_PATH=y$' "$OUT_DIR/.config"
+          grep -q '^CONFIG_KSU_SUSFS_SUS_MOUNT=y$' "$OUT_DIR/.config"
+          grep -q '^CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y$' "$OUT_DIR/.config"
+          if grep -q '^CONFIG_KSU_SUSFS_SUS_SU=y$' "$OUT_DIR/.config"; then
+            echo "SUS-SU must remain disabled on the manual-hook build" >&2
             exit 1
           fi
           grep -q '^CONFIG_IKCONFIG_PROC=y$' "$OUT_DIR/.config"
@@ -161,7 +165,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: rova-kernel-ksun-hardened-${{ github.sha }}
+          name: rova-kernel-ksun-susfs-${{ github.sha }}
           path: artifacts/
           if-no-files-found: error
           retention-days: 14
