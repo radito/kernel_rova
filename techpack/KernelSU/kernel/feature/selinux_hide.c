@@ -127,20 +127,30 @@ out:
 typedef int (*sel_open_handle_status_fn)(struct inode *inode,
 					 struct file *filp);
 static sel_open_handle_status_fn orig_sel_open_handle_status = NULL;
+static DEFINE_MUTEX(selinux_status_hook_mutex);
+static bool selinux_status_hooked;
 
 static int __nocfi my_sel_open_handle_status(struct inode *inode, struct file *filp)
 {
+	sel_open_handle_status_fn original;
+
 	if (likely(test_thread_flag(TIF_SECCOMP) &&
-	current_uid().val >= 10000 &&
+		   current_uid().val >= 10000 &&
 		   ksu_selinux_hide_is_enabled)) {
 		struct page *data = READ_ONCE(fake_status);
 		if (data) {
-			filp->private_data = page_address(data);
+			filp->private_data = data;
 			return 0;
 		}
 	}
 
-	return orig_sel_open_handle_status(inode, filp);
+	original = READ_ONCE(orig_sel_open_handle_status);
+	if (unlikely(!original || original == my_sel_open_handle_status)) {
+		pr_err_ratelimited("ksu_selinux_hide: invalid original status open handler\n");
+		return -EIO;
+	}
+
+	return original(inode, filp);
 }
 
 #define FORCE_VOLATILE(x) *(volatile typeof(x) *)&(x)
@@ -198,39 +208,81 @@ out:
 
 static void hook_selinux_status_open(void)
 {
-	if (orig_sel_open_handle_status)
-	return;
-
 	struct file_operations *ops = NULL;
-	if (resolve_fops("/sys/fs/selinux/status", &ops)) {
+	sel_open_handle_status_fn original;
+	int ret;
+
+	mutex_lock(&selinux_status_hook_mutex);
+	if (selinux_status_hooked)
+		goto out;
+
+	ret = resolve_fops("/sys/fs/selinux/status", &ops);
+	if (ret) {
 		pr_err("ksu_selinux_hide: sel_handle_status_ops not found, fake status disabled\n");
-		return;
+		goto out;
 	}
 
 	if (!ops->open) {
 		pr_err("ksu_selinux_hide: sel_handle_status_ops->open is NULL\n");
-		return;
+		goto out;
 	}
-	
-	orig_sel_open_handle_status = ops->open;
-	patch_fops_open(ops, my_sel_open_handle_status);
+
+	original = READ_ONCE(ops->open);
+	if (original == my_sel_open_handle_status) {
+		pr_err("ksu_selinux_hide: status open handler is already hooked\n");
+		goto out;
+	}
+
+	WRITE_ONCE(orig_sel_open_handle_status, original);
+	/* Publish the fallback before the patched fops can invoke the wrapper. */
+	smp_wmb();
+	ret = patch_fops_open(ops, my_sel_open_handle_status);
+	if (ret) {
+		WRITE_ONCE(orig_sel_open_handle_status, NULL);
+		pr_err("ksu_selinux_hide: failed to hook status open: %d\n",
+		       ret);
+		goto out;
+	}
+
+	selinux_status_hooked = true;
 	pr_info("ksu_selinux_hide: hooked sel_handle_status_ops->open\n");
+out:
+	mutex_unlock(&selinux_status_hook_mutex);
 }
 
 static void unhook_selinux_status_open(void)
 {
-	if (!orig_sel_open_handle_status)
-	return;
-
 	struct file_operations *ops = NULL;
-	if (resolve_fops("/sys/fs/selinux/status", &ops)) {
-		pr_err("ksu_selinux_hide: sel_handle_status_ops not found on unhook\n");
-		return;
-}
+	sel_open_handle_status_fn original;
+	int ret;
 
-	patch_fops_open(ops, orig_sel_open_handle_status);
-	orig_sel_open_handle_status = NULL;
+	mutex_lock(&selinux_status_hook_mutex);
+	if (!selinux_status_hooked)
+		goto out;
+
+	ret = resolve_fops("/sys/fs/selinux/status", &ops);
+	if (ret) {
+		pr_err("ksu_selinux_hide: sel_handle_status_ops not found on unhook\n");
+		goto out;
+	}
+
+	original = READ_ONCE(orig_sel_open_handle_status);
+	if (!original || original == my_sel_open_handle_status) {
+		pr_err("ksu_selinux_hide: invalid original handler on unhook\n");
+		goto out;
+	}
+
+	ret = patch_fops_open(ops, original);
+	if (ret) {
+		pr_err("ksu_selinux_hide: failed to unhook status open: %d\n",
+		       ret);
+		goto out;
+	}
+
+	selinux_status_hooked = false;
 	pr_info("ksu_selinux_hide: unhooked sel_handle_status_ops->open\n");
+out:
+	mutex_unlock(&selinux_status_hook_mutex);
 }
 
 static int selinux_hide_status_feature_get(u64 *value)
