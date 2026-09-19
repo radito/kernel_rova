@@ -127,10 +127,7 @@ jobs:
             grep -E '^CONFIG_KSU_SUSFS' "$OUT_DIR/.config" >&2
             exit 1
           fi
-          if grep -q '^CONFIG_IKCONFIG_PROC=y$' "$OUT_DIR/.config"; then
-            echo "/proc/config.gz must remain disabled" >&2
-            exit 1
-          fi
+          grep -q '^CONFIG_IKCONFIG_PROC=y$' "$OUT_DIR/.config"
           grep -E '^CONFIG_KSU' "$OUT_DIR/.config"
 
       - name: Build kernel
