@@ -28,9 +28,6 @@
 #include "compat/kernel_compat.h"
 #ifdef CONFIG_KSU_SUSFS
 #include <linux/susfs_def.h>
-#ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
-#include <linux/susfs.h>
-#endif
 #endif
 
 extern void disable_seccomp(struct task_struct *tsk);
@@ -94,7 +91,8 @@ int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid)
     }
 
 #ifdef CONFIG_KSU_SUSFS
-	if (is_appuid(new_uid)) {
+	if (old_uid == 0 && is_appuid(new_uid) &&
+	    is_zygote(current_cred())) {
 		task_lock(current);
 		if (ksu_is_allow_uid(new_uid))
 			current->susfs_task_state &=
@@ -104,10 +102,6 @@ int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid)
 				TASK_STRUCT_NON_ROOT_USER_APP_PROC;
 		task_unlock(current);
 	}
-#ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
-	if (is_appuid(new_uid) && !ksu_is_allow_uid(new_uid))
-		susfs_try_umount(new_uid);
-#endif
 #endif
 
     // Handle kernel umount

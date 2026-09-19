@@ -136,6 +136,7 @@ jobs:
 
       - name: Build kernel
         run: |
+          set -o pipefail
           make -j"$(nproc)" \
             O="$OUT_DIR" \
             ARCH="$ARCH" \

@@ -1,5 +1,6 @@
 #include <linux/errno.h>
 #include <linux/cred.h>
+#include <linux/namei.h>
 #include <linux/sched.h>
 #include <linux/string.h>
 #include <linux/susfs.h>
@@ -14,6 +15,18 @@
 #ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
 extern void susfs_run_try_umount_for_current_mnt_ns(void);
 #endif
+
+#ifdef CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT
+extern bool susfs_is_auto_add_sus_bind_mount_enabled;
+#endif
+#ifdef CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT
+extern bool susfs_is_auto_add_sus_ksu_default_mount_enabled;
+#endif
+#ifdef CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT
+extern bool susfs_is_auto_add_try_umount_for_bind_mount_enabled;
+#endif
+
+static bool susfs_umount_for_zygote_system_process;
 
 static int susfs_reply(unsigned long arg5, int error)
 {
@@ -241,6 +254,53 @@ bool susfs_is_current_ksu_domain(void)
 bool susfs_is_current_zygote_domain(void)
 {
 	return unlikely(is_zygote(current_cred()));
+}
+
+static bool __maybe_unused susfs_marker_exists(const char *pathname)
+{
+	struct path path;
+
+	if (kern_path(pathname, 0, &path))
+		return false;
+
+	path_put(&path);
+	return true;
+}
+
+void ksu_susfs_on_post_fs_data(void)
+{
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+	susfs_umount_for_zygote_system_process =
+		susfs_marker_exists(
+			DATA_ADB_UMOUNT_FOR_ZYGOTE_SYSTEM_PROCESS);
+	pr_info("susfs: umount zygote system processes: %d\n",
+		susfs_umount_for_zygote_system_process);
+#endif
+#ifdef CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT
+	if (susfs_marker_exists(DATA_ADB_NO_AUTO_ADD_SUS_BIND_MOUNT))
+		susfs_is_auto_add_sus_bind_mount_enabled = false;
+	pr_info("susfs: auto-add bind mounts: %d\n",
+		susfs_is_auto_add_sus_bind_mount_enabled);
+#endif
+#ifdef CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT
+	if (susfs_marker_exists(DATA_ADB_NO_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT))
+		susfs_is_auto_add_sus_ksu_default_mount_enabled = false;
+	pr_info("susfs: auto-add KernelSU mounts: %d\n",
+		susfs_is_auto_add_sus_ksu_default_mount_enabled);
+#endif
+#ifdef CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT
+	if (susfs_marker_exists(
+		    DATA_ADB_NO_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT))
+		susfs_is_auto_add_try_umount_for_bind_mount_enabled = false;
+	pr_info("susfs: auto-add bind mounts to try-umount: %d\n",
+		susfs_is_auto_add_try_umount_for_bind_mount_enabled);
+#endif
+}
+
+bool ksu_susfs_should_umount_system_process(uid_t uid)
+{
+	return susfs_umount_for_zygote_system_process && uid >= 1000 &&
+		uid < 10000;
 }
 
 #ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
