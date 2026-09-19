@@ -1,0 +1,167 @@
+name: Build kernel
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 15-dev
+  pull_request:
+    branches:
+      - 15-dev
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kernel-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build rova Image.gz-dtb
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+
+    env:
+      ARCH: arm64
+      OUT_DIR: out
+      KBUILD_BUILD_USER: github-actions
+      KBUILD_BUILD_HOST: github
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+
+    steps:
+      - name: Check out kernel source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            bc \
+            binutils-aarch64-linux-gnu \
+            binutils-arm-linux-gnueabi \
+            bison \
+            build-essential \
+            ccache \
+            clang \
+            flex \
+            libelf-dev \
+            libssl-dev \
+            lld \
+            llvm \
+            python3 \
+            rsync
+
+      - name: Restore compiler cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .ccache
+          key: ${{ runner.os }}-rova-15-dev-${{ hashFiles('arch/arm64/configs/vendor/**') }}
+          restore-keys: |
+            ${{ runner.os }}-rova-15-dev-
+
+      - name: Configure compiler cache
+        run: |
+          ccache --max-size=2G
+          ccache --zero-stats
+          printf '%s\n' "$HOME/.local/bin" >> "$GITHUB_PATH"
+          mkdir -p "$HOME/.local/bin"
+          ln -s "$(command -v ccache)" "$HOME/.local/bin/clang"
+          ln -s "$(command -v ccache)" "$HOME/.local/bin/clang++"
+
+      - name: Show compiler versions
+        run: |
+          clang --version
+          ld.lld --version
+          aarch64-linux-gnu-ld --version | head -n 1
+          arm-linux-gnueabi-ld --version | head -n 1
+
+      - name: Configure rova kernel
+        run: |
+          make_args=(
+            O="$OUT_DIR"
+            ARCH="$ARCH"
+            LLVM=1
+            LLVM_IAS=1
+            CROSS_COMPILE=aarch64-linux-gnu-
+            CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
+          )
+
+          make "${make_args[@]}" vendor/msm8937-perf_defconfig
+
+          fragments=(
+            arch/arm64/configs/vendor/msm8937-legacy.config
+            arch/arm64/configs/vendor/common.config
+            arch/arm64/configs/vendor/debugfs.config
+            arch/arm64/configs/vendor/feature/android-12.config
+            arch/arm64/configs/vendor/feature/exfat.config
+            arch/arm64/configs/vendor/feature/ntfs.config
+            arch/arm64/configs/vendor/feature/kprobes.config
+            arch/arm64/configs/vendor/feature/lmkd.config
+            arch/arm64/configs/vendor/feature/wireguard.config
+            arch/arm64/configs/vendor/xiaomi/msm8937/common.config
+            arch/arm64/configs/vendor/xiaomi/msm8937/mi8917.config
+          )
+
+          if grep -q CONFIG_KSU_STATIC_HOOKS techpack/KernelSU/kernel/ksu.c 2>/dev/null; then
+            fragments+=(arch/arm64/configs/vendor/feature/ksu_static_hooks.config)
+          fi
+
+          fragments+=(
+            arch/arm64/configs/vendor/feature/pocket-judge.config
+            arch/arm64/configs/vendor/feature/net.config
+            arch/arm64/configs/vendor/feature/ksu_susfs.config
+          )
+
+          scripts/kconfig/merge_config.sh -m -O "$OUT_DIR" \
+            "$OUT_DIR/.config" "${fragments[@]}"
+          make "${make_args[@]}" olddefconfig
+
+      - name: Build kernel
+        run: |
+          make -j"$(nproc)" \
+            O="$OUT_DIR" \
+            ARCH="$ARCH" \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
+            Image.gz-dtb 2>&1 | tee build.log
+
+      - name: Show compiler cache statistics
+        if: always()
+        run: ccache --show-stats
+
+      - name: Collect build outputs
+        if: success()
+        run: |
+          mkdir -p artifacts
+          cp "$OUT_DIR/arch/arm64/boot/Image.gz-dtb" artifacts/
+          cp "$OUT_DIR/arch/arm64/boot/Image.gz" artifacts/
+          cp "$OUT_DIR/.config" artifacts/kernel.config
+          cp "$OUT_DIR/System.map" artifacts/
+          find "$OUT_DIR/arch/arm64/boot/dts" -type f -name '*.dtb' \
+            -exec cp --parents '{}' artifacts/ \;
+          sha256sum artifacts/Image.gz-dtb > artifacts/SHA256SUMS
+
+      - name: Upload kernel artifacts
+        if: success()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rova-kernel-${{ github.sha }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rova-kernel-build-log-${{ github.sha }}
+          path: |
+            build.log
+            out/.config
+          if-no-files-found: warn
+          retention-days: 7
