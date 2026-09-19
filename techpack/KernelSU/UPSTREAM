@@ -1,0 +1,8 @@
+Repository: https://github.com/KernelSU-Next/KernelSU-Next
+Branch: legacy
+Commit: a54e4fa46c6cc25bcaa055cf14d790194beffed8
+Describe: v3.2.0-legacy-14-ga54e4fa4
+KernelSU version code: 33193
+
+The vendored kernel/ directory is pinned to the commit above. Local changes
+are limited to build/version integration for this Linux 4.19 kernel.

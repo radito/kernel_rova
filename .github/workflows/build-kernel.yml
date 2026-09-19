@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - 15-dev
+      - experiment/ksun-next-legacy
   pull_request:
     branches:
       - 15-dev
@@ -18,7 +19,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build rova Image.gz-dtb (KSU disabled)
+    name: Build rova Image.gz-dtb (KernelSU-Next legacy)
     runs-on: ubuntu-24.04
     timeout-minutes: 180
 
@@ -108,19 +109,25 @@ jobs:
           fragments+=(
             arch/arm64/configs/vendor/feature/pocket-judge.config
             arch/arm64/configs/vendor/feature/net.config
-            arch/arm64/configs/vendor/feature/no-ksu.config
+            arch/arm64/configs/vendor/feature/ksun_legacy.config
           )
 
           scripts/kconfig/merge_config.sh -m -O "$OUT_DIR" \
             "$OUT_DIR/.config" "${fragments[@]}"
           make "${make_args[@]}" olddefconfig
 
-          if grep -Eq '^CONFIG_KSU.*=y$' "$OUT_DIR/.config"; then
-            echo "KernelSU unexpectedly remains enabled:" >&2
-            grep -E '^CONFIG_KSU' "$OUT_DIR/.config" >&2
+          grep -q '^CONFIG_KSU=y$' "$OUT_DIR/.config"
+          grep -q '^CONFIG_KSU_MANUAL_HOOK=y$' "$OUT_DIR/.config"
+          if grep -q '^CONFIG_KSU_KPROBES_HOOK=y$' "$OUT_DIR/.config"; then
+            echo "KernelSU Kprobes hook must remain disabled on kernel 4.19" >&2
             exit 1
           fi
-          grep -q '^# CONFIG_KSU is not set$' "$OUT_DIR/.config"
+          if grep -Eq '^CONFIG_KSU_SUSFS.*=y$' "$OUT_DIR/.config"; then
+            echo "SUSFS unexpectedly enabled:" >&2
+            grep -E '^CONFIG_KSU_SUSFS' "$OUT_DIR/.config" >&2
+            exit 1
+          fi
+          grep -E '^CONFIG_KSU' "$OUT_DIR/.config"
 
       - name: Build kernel
         run: |
@@ -153,7 +160,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: rova-kernel-no-ksu-${{ github.sha }}
+          name: rova-kernel-ksun-legacy-${{ github.sha }}
           path: artifacts/
           if-no-files-found: error
           retention-days: 14
