@@ -10,6 +10,9 @@
 #include <linux/printk.h>
 #include <linux/string.h>
 #include <linux/types.h>
+#ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
+#include <linux/susfs.h>
+#endif
 #ifndef KSU_HAS_PATH_UMOUNT
 #include <linux/syscalls.h>
 #endif
