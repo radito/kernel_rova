@@ -12,6 +12,8 @@
 #include <linux/namei.h>
 #include <linux/kthread.h>
 #include <linux/delay.h>
+#include <linux/cred.h>
+#include <linux/string.h>
 #include "policy/feature.h"
 #include "include/ksu.h"
 #include  "uapi/feature.h"
@@ -37,6 +39,97 @@ extern struct selinux_state selinux_state;
 
 // enabled by default
 static bool ksu_selinux_hide_is_enabled __read_mostly = true;
+
+static bool context_has_kernelsu_type(const char *context, size_t size)
+{
+	const char *end;
+	const char *field;
+	const char *separator;
+	size_t type_len;
+
+	if (!context || !size)
+		return false;
+
+	while (size && (context[size - 1] == '\0' ||
+			context[size - 1] == '\n'))
+		size--;
+	if (!size)
+		return false;
+
+	end = context + size;
+	separator = memchr(context, ':', size);
+	if (!separator)
+		return false;
+
+	field = separator + 1;
+	separator = memchr(field, ':', end - field);
+	if (!separator)
+		return false;
+
+	field = separator + 1;
+	separator = memchr(field, ':', end - field);
+	if (!separator)
+		separator = end;
+
+	type_len = separator - field;
+	return (type_len == strlen(KERNEL_SU_DOMAIN) &&
+		!memcmp(field, KERNEL_SU_DOMAIN, type_len)) ||
+	       (type_len == strlen(KERNEL_SU_FILE) &&
+		!memcmp(field, KERNEL_SU_FILE, type_len));
+}
+
+static bool selinux_hide_for_current(void)
+{
+	return READ_ONCE(ksu_selinux_hide_is_enabled) &&
+	       current_uid().val >= 10000;
+}
+
+/*
+ * A stock policy does not know the KernelSU-only types.  Reject them before
+ * the live, extended policy resolves them so app probes observe the same
+ * -EINVAL result and cannot trigger a ksu_file bounded-transition audit.
+ */
+int ksu_selinux_hide_validate_context(const char *context, size_t size)
+{
+	if (!selinux_hide_for_current())
+		return 0;
+
+	return context_has_kernelsu_type(context, size) ? -EINVAL : 0;
+}
+
+int ksu_selinux_hide_validate_access(const char *request, size_t size)
+{
+	const char *cursor = request;
+	const char *end;
+	int fields;
+
+	if (!selinux_hide_for_current() || !request || !size)
+		return 0;
+
+	end = request + size;
+	for (fields = 0; fields < 2; fields++) {
+		const char *field;
+
+		while (cursor < end && (*cursor == ' ' || *cursor == '\t' ||
+					*cursor == '\n'))
+			cursor++;
+		field = cursor;
+		while (cursor < end && *cursor != '\0' && *cursor != ' ' &&
+		       *cursor != '\t' && *cursor != '\n')
+			cursor++;
+
+		if (context_has_kernelsu_type(field, cursor - field))
+			return -EINVAL;
+	}
+
+	return 0;
+}
+
+u32 ksu_selinux_hide_access_seqno(u32 seqno)
+{
+	/* Match the stock policy generation exposed by a normal Android boot. */
+	return selinux_hide_for_current() ? 1 : seqno;
+}
 
 static u32 ksu_sid __read_mostly = 0;
 static u32 priv_app_sid __read_mostly = 0;
@@ -287,20 +380,20 @@ out:
 
 static int selinux_hide_status_feature_get(u64 *value)
 {
-	*value = ksu_selinux_hide_is_enabled ? 1 : 0;
+	*value = READ_ONCE(ksu_selinux_hide_is_enabled) ? 1 : 0;
 	return 0;
 }
 
 static int selinux_hide_status_feature_set(u64 value)
 {
 	bool enable = !!value;
-	if (enable == ksu_selinux_hide_is_enabled) {
+	if (enable == READ_ONCE(ksu_selinux_hide_is_enabled)) {
 		pr_info("ksu_selinux_hide: no need to change\n");
 		return 0;
 	}
-	ksu_selinux_hide_is_enabled = enable;
+	WRITE_ONCE(ksu_selinux_hide_is_enabled, enable);
 
-	if (!ksu_selinux_hide_is_enabled)
+	if (!enable)
 		ksu_selinux_hide_disable();
 	else
 		ksu_selinux_hide_enable();

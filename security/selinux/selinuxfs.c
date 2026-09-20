@@ -32,6 +32,7 @@
 #include <linux/uaccess.h>
 #include <linux/kobject.h>
 #include <linux/ctype.h>
+#include <linux/ksu_selinux_hide.h>
 
 /* selinuxfs pseudo filesystem for exporting the security policy API.
    Based on the proc code and the fs/nfsd/nfsctl.c code. */
@@ -614,6 +615,10 @@ static ssize_t sel_write_context(struct file *file, char *buf, size_t size)
 	if (length)
 		goto out;
 
+	length = ksu_selinux_hide_validate_context(buf, size);
+	if (length)
+		goto out;
+
 	length = security_context_to_sid(state, buf, size, &sid, GFP_KERNEL);
 	if (length)
 		goto out;
@@ -836,6 +841,10 @@ static ssize_t sel_write_access(struct file *file, char *buf, size_t size)
 	if (length)
 		goto out;
 
+	length = ksu_selinux_hide_validate_access(buf, size);
+	if (length)
+		goto out;
+
 	length = -ENOMEM;
 	scon = kzalloc(size + 1, GFP_KERNEL);
 	if (!scon)
@@ -859,6 +868,7 @@ static ssize_t sel_write_access(struct file *file, char *buf, size_t size)
 		goto out;
 
 	security_compute_av_user(state, ssid, tsid, tclass, &avd);
+	avd.seqno = ksu_selinux_hide_access_seqno(avd.seqno);
 
 	length = scnprintf(buf, SIMPLE_TRANSACTION_LIMIT,
 			  "%x %x %x %x %u %x",

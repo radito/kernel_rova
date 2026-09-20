@@ -91,6 +91,7 @@
 #include <linux/bpf.h>
 #include <linux/kernfs.h>
 #include <linux/stringhash.h>	/* for hashlen_string() */
+#include <linux/ksu_selinux_hide.h>
 
 #include "avc.h"
 #include "objsec.h"
@@ -6321,6 +6322,12 @@ static int selinux_setprocattr(const char *name, void *value, size_t size)
 		error = -EINVAL;
 	if (error)
 		return error;
+
+	if (!strcmp(name, "current")) {
+		error = ksu_selinux_hide_validate_context(value, size);
+		if (error)
+			return error;
+	}
 
 	/* Obtain a SID for the context, if one was specified. */
 	if (size && str[0] && str[0] != '\n') {
